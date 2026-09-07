@@ -13,6 +13,7 @@ BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 # ======================
 
 CHATS_FILE = "chats.txt"
+OFFSET_FILE = "offset.txt"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_chats():
@@ -25,6 +26,17 @@ def load_chats():
 def save_chats(chats):
     with open(CHATS_FILE, 'w') as f:
         json.dump(chats, f)
+
+def load_offset():
+    try:
+        with open(OFFSET_FILE, 'r') as f:
+            return int(f.read().strip())
+    except:
+        return 0
+
+def save_offset(offset):
+    with open(OFFSET_FILE, 'w') as f:
+        f.write(str(offset))
 
 def add_chat(chat_id):
     chats = load_chats()
@@ -43,33 +55,52 @@ def remove_chat(chat_id):
         logging.info(f"➖ Чат удалён: {chat_id}")
 
 def handle_updates(offset):
-    """Проверяет входящие сообщения на команду /start"""
+    """Проверяет входящие сообщения на команду /start (включая каналы)"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
         resp = requests.get(url, params={'offset': offset, 'timeout': 10}, timeout=15)
         if resp.status_code != 200:
             return offset
-        updates = resp.json().get('result', [])
+        data = resp.json()
+        if not data.get('ok'):
+            return offset
+        updates = data.get('result', [])
         if not updates:
             return offset
+
+        # Новый offset = последний update_id + 1
         new_offset = updates[-1]['update_id'] + 1
 
         for upd in updates:
+            # Обрабатываем как обычные сообщения, так и посты в каналах
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
                 if text == '/start':
                     if add_chat(chat_id):
-                        # Отвечаем в чат
+                        # Отправляем ответ в чат
                         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                                       data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
+            elif 'channel_post' in upd:
+                # Это сообщение из канала
+                post = upd['channel_post']
+                chat_id = post['chat']['id']
+                text = post.get('text', '')
+                if text == '/start':
+                    if add_chat(chat_id):
+                        # Отправляем ответ в канал
+                        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                                      data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
+
+        # Сохраняем offset, чтобы больше не обрабатывать эти обновления
+        save_offset(new_offset)
         return new_offset
     except Exception as e:
         logging.error(f"Ошибка получения обновлений: {e}")
         return offset
 
-# --- VK и отправка (остальное без изменений) ---
+# --- VK и отправка ---
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
 last_post_id = 0
@@ -147,14 +178,16 @@ def process_attachment(att, post_id, chats):
 
 def main():
     global last_post_id
-    offset = 0
+    offset = load_offset()  # загружаем сохранённый offset
     chats = load_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
+    logging.info(f"📌 Текущий offset: {offset}")
 
     while True:
         # Обработка команд
         offset = handle_updates(offset)
-        # Обновляем список чатов
+
+        # Обновляем список чатов (возможно, добавились новые)
         chats = load_chats()
 
         # Проверка VK
