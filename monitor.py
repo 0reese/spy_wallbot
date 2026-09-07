@@ -8,7 +8,7 @@ import json
 # ===== НАСТРОЙКИ =====
 VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
 USER_ID = "1128567349"
-CHECK_INTERVAL = 60
+CHECK_INTERVAL = 31
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 # ======================
 
@@ -38,24 +38,74 @@ def save_offset(offset):
     with open(OFFSET_FILE, 'w') as f:
         f.write(str(offset))
 
-def add_chat(chat_id):
+def add_chat(chat_id, thread_id=None):
     chats = load_chats()
-    if chat_id not in chats:
-        chats.append(chat_id)
-        save_chats(chats)
-        logging.info(f"➕ Чат добавлен: {chat_id}")
-        return True
-    return False
+    # Проверяем, существует ли уже такая пара (chat_id, thread_id)
+    for chat in chats:
+        if chat.get('chat_id') == chat_id and chat.get('thread_id') == thread_id:
+            return False
+    chats.append({'chat_id': chat_id, 'thread_id': thread_id})
+    save_chats(chats)
+    logging.info(f"➕ Чат добавлен: {chat_id} (тема: {thread_id if thread_id else 'общий'})")
+    return True
 
-def remove_chat(chat_id):
+def remove_chat(chat_id, thread_id=None):
     chats = load_chats()
-    if chat_id in chats:
-        chats.remove(chat_id)
-        save_chats(chats)
-        logging.info(f"➖ Чат удалён: {chat_id}")
+    new_chats = [c for c in chats if not (c.get('chat_id') == chat_id and c.get('thread_id') == thread_id)]
+    if len(new_chats) != len(chats):
+        save_chats(new_chats)
+        logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id else 'общий'})")
 
+def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    # Если есть thread_id, добавляем его в данные
+    if thread_id is not None:
+        if data is None:
+            data = {}
+        data['message_thread_id'] = thread_id
+
+    try:
+        if files:
+            response = requests.post(url, files=files, data=data, timeout=30)
+        else:
+            response = requests.post(url, data=data, timeout=30)
+        if response.status_code == 200:
+            return True
+        else:
+            logging.error(f"❌ Ошибка в {chat_id} (тема {thread_id}): {response.text}")
+            # Удаляем чат при ошибках доступа или закрытой теме
+            if response.status_code in [403, 404] or (response.status_code == 400 and "TOPIC_CLOSED" in response.text):
+                remove_chat(chat_id, thread_id)
+            return False
+    except Exception as e:
+        logging.error(f"❌ Ошибка отправки в {chat_id} (тема {thread_id}): {e}")
+        return False
+
+def send_document(chat_id, file_path, thread_id=None):
+    with open(file_path, 'rb') as f:
+        files = {'document': f}
+        data = {'chat_id': chat_id}
+        return send_message_to_chat(chat_id, 'sendDocument', data=data, files=files, thread_id=thread_id)
+
+def send_text(chat_id, text, thread_id=None):
+    data = {'chat_id': chat_id, 'text': text}
+    return send_message_to_chat(chat_id, 'sendMessage', data=data, thread_id=thread_id)
+
+def send_to_all_chats(file_path, chats):
+    for chat in chats.copy():
+        chat_id = chat['chat_id']
+        thread_id = chat.get('thread_id')
+        success = send_document(chat_id, file_path, thread_id)
+        # Если не удалось, удаление происходит внутри send_document при ошибке
+
+def send_text_to_all_chats(text, chats):
+    for chat in chats.copy():
+        chat_id = chat['chat_id']
+        thread_id = chat.get('thread_id')
+        send_text(chat_id, text, thread_id)
+
+# --- Обработка обновлений Telegram ---
 def handle_updates(offset):
-    """Проверяет входящие сообщения на команду /start (включая каналы)"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
         resp = requests.get(url, params={'offset': offset, 'timeout': 10}, timeout=15)
@@ -71,24 +121,24 @@ def handle_updates(offset):
         new_offset = updates[-1]['update_id'] + 1
 
         for upd in updates:
-            # Обрабатываем обычные сообщения
+            # Обрабатываем обычные сообщения и посты в каналах
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
+                # Получаем thread_id, если сообщение в теме
+                thread_id = msg.get('message_thread_id')
                 if text == '/start':
-                    if add_chat(chat_id):
-                        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                                      data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
-            # Обрабатываем посты в каналах
+                    if add_chat(chat_id, thread_id):
+                        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
                 text = post.get('text', '')
+                # В каналах нет тем, thread_id не нужен
                 if text == '/start':
-                    if add_chat(chat_id):
-                        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                                      data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
+                    if add_chat(chat_id, None):
+                        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.')
 
         save_offset(new_offset)
         return new_offset
@@ -96,35 +146,10 @@ def handle_updates(offset):
         logging.error(f"Ошибка получения обновлений: {e}")
         return offset
 
-# --- VK и отправка ---
+# --- VK и обработка постов ---
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
 last_post_id = 0
-
-def send_to_telegram(file_path, chat_id):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    try:
-        with open(file_path, 'rb') as f:
-            files = {'document': f}
-            data = {'chat_id': chat_id}
-            response = requests.post(url, files=files, data=data, timeout=30)
-            if response.status_code == 200:
-                logging.info(f"✅ Отправлено в {chat_id}: {os.path.basename(file_path)}")
-                return True
-            else:
-                logging.error(f"❌ Ошибка в {chat_id}: {response.text}")
-                if response.status_code in [403, 404]:
-                    return False
-                return True
-    except Exception as e:
-        logging.error(f"❌ Ошибка отправки в {chat_id}: {e}")
-        return False
-
-def send_to_all_chats(file_path, chats):
-    for chat_id in chats.copy():
-        success = send_to_telegram(file_path, chat_id)
-        if not success:
-            remove_chat(chat_id)
 
 def process_attachment(att, post_id, chats):
     att_type = att['type']
@@ -164,13 +189,7 @@ def process_attachment(att, post_id, chats):
         video = att['video']
         link = f"https://vk.com/video{video['owner_id']}_{video['id']}"
         text = f"🎬 Видео в посте #{post_id}:\n{link}"
-        for chat_id in chats:
-            try:
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                              data={'chat_id': chat_id, 'text': text}, timeout=30)
-                logging.info(f"📹 Ссылка отправлена в {chat_id}")
-            except Exception as e:
-                logging.error(f"Ошибка отправки ссылки в {chat_id}: {e}")
+        send_text_to_all_chats(text, chats)
 
 def main():
     global last_post_id
@@ -180,12 +199,9 @@ def main():
     logging.info(f"📌 Текущий offset: {offset}")
 
     while True:
-        # Обработка команд
         offset = handle_updates(offset)
-        # Обновляем список чатов
         chats = load_chats()
 
-        # Проверка VK
         try:
             response = vk.wall.get(owner_id=USER_ID, count=5, filter='owner')
             for post in response['items']:
@@ -200,12 +216,7 @@ def main():
                 else:
                     if post.get('text'):
                         text = f"📄 Новый пост #{post_id}:\n{post['text'][:200]}"
-                        for chat_id in chats:
-                            try:
-                                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                                              data={'chat_id': chat_id, 'text': text}, timeout=30)
-                            except Exception as e:
-                                logging.error(f"Ошибка отправки текста в {chat_id}: {e}")
+                        send_text_to_all_chats(text, chats)
         except Exception as e:
             logging.error(f"Ошибка VK: {e}")
 
