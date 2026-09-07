@@ -8,7 +8,7 @@ import json
 # ===== НАСТРОЙКИ =====
 VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
 USER_ID = "1128567349"
-CHECK_INTERVAL = 31
+CHECK_INTERVAL = 60
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 # ======================
 
@@ -16,10 +16,25 @@ CHATS_FILE = "chats.txt"
 OFFSET_FILE = "offset.txt"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def clean_duplicates(chats):
+    seen = set()
+    unique = []
+    for chat in chats:
+        key = (chat.get('chat_id'), chat.get('thread_id'))
+        if key not in seen:
+            seen.add(key)
+            unique.append(chat)
+    return unique
+
 def load_chats():
     try:
         with open(CHATS_FILE, 'r') as f:
-            return json.load(f)
+            chats = json.load(f)
+            cleaned = clean_duplicates(chats)
+            if len(cleaned) != len(chats):
+                save_chats(cleaned)
+                logging.info(f"🧹 Удалены дубликаты чатов (было {len(chats)}, стало {len(cleaned)})")
+            return cleaned
     except:
         return []
 
@@ -40,7 +55,6 @@ def save_offset(offset):
 
 def add_chat(chat_id, thread_id=None):
     chats = load_chats()
-    # Проверяем, существует ли уже такая пара (chat_id, thread_id)
     for chat in chats:
         if chat.get('chat_id') == chat_id and chat.get('thread_id') == thread_id:
             return False
@@ -58,7 +72,6 @@ def remove_chat(chat_id, thread_id=None):
 
 def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    # Если есть thread_id, добавляем его в данные
     if thread_id is not None:
         if data is None:
             data = {}
@@ -73,7 +86,6 @@ def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None)
             return True
         else:
             logging.error(f"❌ Ошибка в {chat_id} (тема {thread_id}): {response.text}")
-            # Удаляем чат при ошибках доступа или закрытой теме
             if response.status_code in [403, 404] or (response.status_code == 400 and "TOPIC_CLOSED" in response.text):
                 remove_chat(chat_id, thread_id)
             return False
@@ -81,22 +93,31 @@ def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None)
         logging.error(f"❌ Ошибка отправки в {chat_id} (тема {thread_id}): {e}")
         return False
 
-def send_document(chat_id, file_path, thread_id=None):
+def send_document(chat_id, file_path, caption=None, thread_id=None):
     with open(file_path, 'rb') as f:
         files = {'document': f}
         data = {'chat_id': chat_id}
+        if caption:
+            data['caption'] = caption
         return send_message_to_chat(chat_id, 'sendDocument', data=data, files=files, thread_id=thread_id)
 
 def send_text(chat_id, text, thread_id=None):
     data = {'chat_id': chat_id, 'text': text}
     return send_message_to_chat(chat_id, 'sendMessage', data=data, thread_id=thread_id)
 
-def send_to_all_chats(file_path, chats):
+def send_to_all_chats(file_path, chats, caption=None, sent_files=None):
+    if sent_files is None:
+        sent_files = set()
+    if file_path in sent_files:
+        logging.info(f"⏩ Файл {file_path} уже отправлен, пропускаем")
+        return
+    sent_files.add(file_path)
+
     for chat in chats.copy():
         chat_id = chat['chat_id']
         thread_id = chat.get('thread_id')
-        success = send_document(chat_id, file_path, thread_id)
-        # Если не удалось, удаление происходит внутри send_document при ошибке
+        logging.info(f"📤 Отправка {file_path} в {chat_id} (тема {thread_id})")
+        send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
 
 def send_text_to_all_chats(text, chats):
     for chat in chats.copy():
@@ -127,11 +148,9 @@ def handle_updates(offset):
                 text = msg.get('text', '')
                 thread_id = msg.get('message_thread_id')
                 if text == '/start':
-                    # Отправляем ответ только если чат был добавлен (т.е. его не было)
                     if add_chat(chat_id, thread_id):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
                     else:
-                        # Чат уже был добавлен — можно просто проигнорировать, чтобы не дублировать
                         logging.info(f"ℹ️ Чат {chat_id} уже активирован, повторный /start игнорируется")
             elif 'channel_post' in upd:
                 post = upd['channel_post']
@@ -154,7 +173,7 @@ vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
 last_post_id = 0
 
-def process_attachment(att, post_id, chats):
+def process_attachment(att, post_id, chats, caption, sent_files):
     att_type = att['type']
     file_path = None
 
@@ -165,7 +184,7 @@ def process_attachment(att, post_id, chats):
             img_data = requests.get(photo_url, timeout=30).content
             with open(file_path, 'wb') as f:
                 f.write(img_data)
-            send_to_all_chats(file_path, chats)
+            send_to_all_chats(file_path, chats, caption=caption, sent_files=sent_files)
         except Exception as e:
             logging.error(f"Ошибка фото: {e}")
 
@@ -179,7 +198,7 @@ def process_attachment(att, post_id, chats):
                     doc_data = requests.get(doc_url, timeout=60).content
                     with open(file_path, 'wb') as f:
                         f.write(doc_data)
-                    send_to_all_chats(file_path, chats)
+                    send_to_all_chats(file_path, chats, caption=caption, sent_files=sent_files)
                     break
                 except Exception as e:
                     logging.error(f"Попытка {attempt+1} не удалась: {e}")
@@ -192,7 +211,9 @@ def process_attachment(att, post_id, chats):
         video = att['video']
         link = f"https://vk.com/video{video['owner_id']}_{video['id']}"
         text = f"🎬 Видео в посте #{post_id}:\n{link}"
-        send_text_to_all_chats(text, chats)
+        # Видео отправляем как ссылку, добавляем текст поста
+        full_text = f"{caption}\n\n{text}" if caption else text
+        send_text_to_all_chats(full_text, chats)
 
 def main():
     global last_post_id
@@ -205,6 +226,8 @@ def main():
         offset = handle_updates(offset)
         chats = load_chats()
 
+        sent_files = set()
+
         try:
             response = vk.wall.get(owner_id=USER_ID, count=5, filter='owner')
             for post in response['items']:
@@ -213,13 +236,26 @@ def main():
                     continue
                 last_post_id = post_id
                 logging.info(f"📝 Новый пост #{post_id}")
+
+                # Получаем текст поста
+                post_text = post.get('text', '')
+                # Ограничим caption до 1024 символов, но отправим полный текст отдельно, если больше
+                caption = post_text[:1024] if post_text else None
+                full_text = post_text if post_text else None
+
+                # Если есть вложения
                 if 'attachments' in post:
+                    # Сначала отправляем файлы с подписью (caption)
                     for att in post['attachments']:
-                        process_attachment(att, post_id, chats)
+                        process_attachment(att, post_id, chats, caption, sent_files)
+                    # Если текст длиннее 1024 символов, отправляем полный текст отдельно
+                    if full_text and len(full_text) > 1024:
+                        send_text_to_all_chats(f"📄 Полный текст поста:\n{full_text}", chats)
                 else:
-                    if post.get('text'):
-                        text = f"📄 Новый пост #{post_id}:\n{post['text'][:200]}"
-                        send_text_to_all_chats(text, chats)
+                    # Если вложений нет, отправляем только текст
+                    if full_text:
+                        send_text_to_all_chats(f"📄 Новый пост #{post_id}:\n{full_text}", chats)
+
         except Exception as e:
             logging.error(f"Ошибка VK: {e}")
 
