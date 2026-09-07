@@ -12,16 +12,16 @@ USER_ID = "1128567349"
 CHECK_INTERVAL = 30
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
-# ==== Настройки Supabase (замените на свои) ====
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # ваш Project URL
-SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"                             # ваш anon public ключ
-# ===============================================
+# ==== Настройки Supabase ====
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
+SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"      # замените на ваш
+# ==========================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Функции работы с БД ---
+# --- Функции работы с БД (чаты) ---
 def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
@@ -31,10 +31,8 @@ def get_chats():
         return []
 
 def add_chat(chat_id, thread_id=None):
-    # Если thread_id не передан, используем 0 для общего чата
     if thread_id is None:
         thread_id = 0
-    # Проверяем, существует ли уже такая пара
     existing = supabase.table('chats').select('*') \
         .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
     if existing.data:
@@ -53,10 +51,29 @@ def remove_chat(chat_id, thread_id=None):
     if result.data:
         logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
 
+# --- Функции для работы с состоянием (last_post_id) ---
+def get_last_post_id():
+    try:
+        response = supabase.table('state').select('value').eq('key', 'last_post_id').execute()
+        if response.data:
+            return int(response.data[0]['value'])
+        else:
+            # Если записи нет, создаём
+            supabase.table('state').insert({'key': 'last_post_id', 'value': '0'}).execute()
+            return 0
+    except Exception as e:
+        logging.error(f"Ошибка загрузки last_post_id: {e}")
+        return 0
+
+def save_last_post_id(post_id):
+    try:
+        supabase.table('state').update({'value': str(post_id)}).eq('key', 'last_post_id').execute()
+    except Exception as e:
+        logging.error(f"Ошибка сохранения last_post_id: {e}")
+
 # --- Отправка сообщений ---
 def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    # Если thread_id = 0 или None, не передаём параметр
     if thread_id and thread_id != 0:
         if data is None:
             data = {}
@@ -150,7 +167,6 @@ def handle_updates(offset):
 # --- VK и обработка постов ---
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
-last_post_id = 0
 
 def process_attachment(att, post_id, chats, caption, sent_files):
     att_type = att['type']
@@ -191,19 +207,25 @@ def process_attachment(att, post_id, chats, caption, sent_files):
         send_text_to_all_chats(full_text, chats)
 
 def main():
-    global last_post_id
+    # Загружаем last_post_id из Supabase
+    last_post_id = get_last_post_id()
+    logging.info(f"📌 Загружен last_post_id: {last_post_id}")
+
     try:
         with open('offset.txt', 'r') as f:
             offset = int(f.read().strip())
     except:
         offset = 0
+
     chats = get_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
     logging.info(f"📌 Текущий offset: {offset}")
+
     while True:
         offset = handle_updates(offset)
         chats = get_chats()
         sent_files = set()
+
         try:
             response = vk.wall.get(owner_id=USER_ID, count=5, filter='owner')
             for post in response['items']:
@@ -212,9 +234,13 @@ def main():
                     continue
                 last_post_id = post_id
                 logging.info(f"📝 Новый пост #{post_id}")
+                # Сохраняем новый ID сразу после обработки
+                save_last_post_id(last_post_id)
+
                 post_text = post.get('text', '')
                 caption = post_text[:1024] if post_text else None
                 full_text = post_text if post_text else None
+
                 if 'attachments' in post:
                     for att in post['attachments']:
                         process_attachment(att, post_id, chats, caption, sent_files)
@@ -223,8 +249,10 @@ def main():
                 else:
                     if full_text:
                         send_text_to_all_chats(f"📄 Новый пост #{post_id}:\n{full_text}", chats)
+
         except Exception as e:
             logging.error(f"Ошибка VK: {e}")
+
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
