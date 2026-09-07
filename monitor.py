@@ -13,7 +13,7 @@ CHECK_INTERVAL = 30
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
 # ==== Настройки Supabase (замените на свои) ====
-SUPABASE_URL = "https://supabase.com/dashboard/project/dsbdjnxmhpeforcvqqep"   # из Project URL
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # из Project URL
 SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"          # из Published key
 # ===============================================
 
