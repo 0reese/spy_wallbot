@@ -68,32 +68,28 @@ def handle_updates(offset):
         if not updates:
             return offset
 
-        # Новый offset = последний update_id + 1
         new_offset = updates[-1]['update_id'] + 1
 
         for upd in updates:
-            # Обрабатываем как обычные сообщения, так и посты в каналах
+            # Обрабатываем обычные сообщения
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
                 if text == '/start':
                     if add_chat(chat_id):
-                        # Отправляем ответ в чат
                         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                                       data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
+            # Обрабатываем посты в каналах
             elif 'channel_post' in upd:
-                # Это сообщение из канала
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
                 text = post.get('text', '')
                 if text == '/start':
                     if add_chat(chat_id):
-                        # Отправляем ответ в канал
                         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                                       data={'chat_id': chat_id, 'text': '✅ Бот активирован! Теперь сюда будут приходить посты.'})
 
-        # Сохраняем offset, чтобы больше не обрабатывать эти обновления
         save_offset(new_offset)
         return new_offset
     except Exception as e:
@@ -178,7 +174,7 @@ def process_attachment(att, post_id, chats):
 
 def main():
     global last_post_id
-    offset = load_offset()  # загружаем сохранённый offset
+    offset = load_offset()
     chats = load_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
     logging.info(f"📌 Текущий offset: {offset}")
@@ -186,8 +182,7 @@ def main():
     while True:
         # Обработка команд
         offset = handle_updates(offset)
-
-        # Обновляем список чатов (возможно, добавились новые)
+        # Обновляем список чатов
         chats = load_chats()
 
         # Проверка VK
