@@ -17,6 +17,29 @@ SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
 SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"   # замените на ваш
 # ==========================
 
+from flask import Flask, request
+import threading
+import time
+import logging
+import vk_api
+import requests
+# ... (все ваши остальные импорты)
+
+app = Flask(__name__)
+
+@app.route('/ping')
+def ping():
+    return "OK", 200
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+if __name__ == "__main__":
+    # Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    # ... остальная логика вашего бота (main())
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
