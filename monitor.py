@@ -16,7 +16,7 @@ BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
 # ==== Настройки Supabase ====
 SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
-SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"   # замените на ваш
+SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"   # замените на ваш
 # ==========================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
