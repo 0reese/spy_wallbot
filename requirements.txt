@@ -1,3 +1,4 @@
 vk_api
 requests
 supabase>=2.0.0
+Flask>=3.0.0
