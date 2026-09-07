@@ -5,7 +5,7 @@ import os
 import logging
 
 # ===== НАСТРОЙКИ =====
-VK_TOKEN = "vk1.a.2oIk5ndL7Gm7MossZ2dqdMRGNOj0ejamQYvXyetmCLfSgsm6ic9IxE4E4eKbcIJaPfsitYggHJocjnTqu1juwQRfLQdM3QubT4AM2Nb1cavWIwsjUpGZx-XKdB-6pPFR8JaCsdeR5Skljjc9LGeGJNTjyTUKC1qGodTLqU1rONEb2298-0w4zcghzjTg6uER"
+VK_TOKEN = "vk1.a.Bz-nwwK34t8ZDzMXyD4ADXvWR9OHrZLXgZvl3OsU2R3mTBCEyQr3zU2TeyIOav65OpXGJoUwvjCpT-WZYgTRYvTeLPDYH5ZOU3TeqTPMWxesL78_ThOVGbpVWccS2mrsWtmY7XY2YXhBWhYgkA7uoG2U0RDcaCRiOuHQu3IyeVOoH06AxSx4aYQkZjtZfNf8rQ7HB9CsriF-TPEdUHnjPQ"
 USER_ID = "1128567349"              # Новая страница
 CHECK_INTERVAL = 30
 
