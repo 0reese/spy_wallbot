@@ -5,10 +5,12 @@ import os
 import logging
 import json
 from supabase import create_client, Client
+from flask import Flask
+import threading
 
 # ===== НАСТРОЙКИ =====
 VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
-USER_ID = "185796802"
+USER_ID = "1128567349"
 CHECK_INTERVAL = 60
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
@@ -17,39 +19,29 @@ SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
 SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"   # замените на ваш
 # ==========================
 
-from flask import Flask, request
-import threading
-import time
-import logging
-import vk_api
-import requests
-# ... (все ваши остальные импорты)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Flask-сервер для пингов ---
 app = Flask(__name__)
 
 @app.route('/ping')
 def ping():
     return "OK", 200
 
+@app.route('/')
+def home():
+    return "Bot is running", 200
+
 def run_flask():
     app.run(host='0.0.0.0', port=10000)
 
-if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    # ... остальная логика вашего бота (main())
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# --- Функции работы с БД (чаты) с удалением дубликатов ---
+# --- Функции работы с БД (чаты) ---
 def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
         data = response.data
-        # Удаляем дубликаты: оставляем только уникальные пары (chat_id, thread_id)
         seen = set()
         unique = []
         for row in data:
@@ -67,6 +59,12 @@ def get_chats():
 def add_chat(chat_id, thread_id=None):
     if thread_id is None:
         thread_id = 0
+    # Если добавляем тему, удаляем запись для общего чата
+    if thread_id != 0:
+        supabase.table('chats').delete().eq('chat_id', chat_id).eq('thread_id', 0).execute()
+    else:
+        # Если добавляем общий чат, удаляем все темы
+        supabase.table('chats').delete().eq('chat_id', chat_id).neq('thread_id', 0).execute()
     existing = supabase.table('chats').select('*') \
         .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
     if existing.data:
@@ -244,6 +242,11 @@ def process_attachment(att, post_id, chats, caption, sent_files):
         send_text_to_all_chats(full_text, chats)
 
 def main():
+    # Запускаем Flask-сервер в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logging.info("🌐 Flask-сервер запущен на порту 10000")
+
     # Загружаем last_post_id из Supabase
     last_post_id = get_last_post_id()
     logging.info(f"📌 Загружен last_post_id: {last_post_id}")
@@ -269,8 +272,6 @@ def main():
                 post_id = post['id']
                 if post_id <= last_post_id:
                     continue
-
-                # Обновляем last_post_id и сразу сохраняем
                 last_post_id = post_id
                 save_last_post_id(last_post_id)
                 logging.info(f"📝 Новый пост #{post_id}")
