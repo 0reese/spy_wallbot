@@ -1,2 +1,3 @@
 vk_api
 requests
+supabase>=2.0.0
