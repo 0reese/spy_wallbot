@@ -13,8 +13,8 @@ CHECK_INTERVAL = 30
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
 # ==== Настройки Supabase (замените на свои) ====
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # из Project URL
-SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"          # из Published key
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # ваш Project URL
+SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"                             # ваш anon public ключ
 # ===============================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -31,26 +31,33 @@ def get_chats():
         return []
 
 def add_chat(chat_id, thread_id=None):
+    # Если thread_id не передан, используем 0 для общего чата
+    if thread_id is None:
+        thread_id = 0
+    # Проверяем, существует ли уже такая пара
     existing = supabase.table('chats').select('*') \
         .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
     if existing.data:
         return False
     data = {'chat_id': chat_id, 'thread_id': thread_id}
     supabase.table('chats').insert(data).execute()
-    logging.info(f"➕ Чат добавлен: {chat_id} (тема: {thread_id if thread_id else 'общий'})")
+    logging.info(f"➕ Чат добавлен: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
     return True
 
 def remove_chat(chat_id, thread_id=None):
+    if thread_id is None:
+        thread_id = 0
     query = supabase.table('chats').delete() \
         .eq('chat_id', chat_id).eq('thread_id', thread_id)
     result = query.execute()
     if result.data:
-        logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id else 'общий'})")
+        logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
 
 # --- Отправка сообщений ---
 def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    if thread_id is not None:
+    # Если thread_id = 0 или None, не передаём параметр
+    if thread_id and thread_id != 0:
         if data is None:
             data = {}
         data['message_thread_id'] = thread_id
@@ -90,13 +97,13 @@ def send_to_all_chats(file_path, chats, caption=None, sent_files=None):
     sent_files.add(file_path)
     for chat in chats:
         chat_id = chat['chat_id']
-        thread_id = chat.get('thread_id')
+        thread_id = chat.get('thread_id', 0)
         send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
 
 def send_text_to_all_chats(text, chats):
     for chat in chats:
         chat_id = chat['chat_id']
-        thread_id = chat.get('thread_id')
+        thread_id = chat.get('thread_id', 0)
         send_text(chat_id, text, thread_id)
 
 # --- Обработка обновлений Telegram ---
