@@ -121,24 +121,27 @@ def handle_updates(offset):
         new_offset = updates[-1]['update_id'] + 1
 
         for upd in updates:
-            # Обрабатываем обычные сообщения и посты в каналах
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
-                # Получаем thread_id, если сообщение в теме
                 thread_id = msg.get('message_thread_id')
                 if text == '/start':
+                    # Отправляем ответ только если чат был добавлен (т.е. его не было)
                     if add_chat(chat_id, thread_id):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
+                    else:
+                        # Чат уже был добавлен — можно просто проигнорировать, чтобы не дублировать
+                        logging.info(f"ℹ️ Чат {chat_id} уже активирован, повторный /start игнорируется")
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
                 text = post.get('text', '')
-                # В каналах нет тем, thread_id не нужен
                 if text == '/start':
                     if add_chat(chat_id, None):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.')
+                    else:
+                        logging.info(f"ℹ️ Канал {chat_id} уже активирован, повторный /start игнорируется")
 
         save_offset(new_offset)
         return new_offset
