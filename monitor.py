@@ -9,23 +9,34 @@ from supabase import create_client, Client
 # ===== НАСТРОЙКИ =====
 VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
 USER_ID = "1128567349"
-CHECK_INTERVAL = 30
+CHECK_INTERVAL = 60
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
 # ==== Настройки Supabase ====
 SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
-SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"      # замените на ваш
+SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"   # замените на ваш
 # ==========================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Функции работы с БД (чаты) ---
+# --- Функции работы с БД (чаты) с удалением дубликатов ---
 def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
-        return response.data
+        data = response.data
+        # Удаляем дубликаты: оставляем только уникальные пары (chat_id, thread_id)
+        seen = set()
+        unique = []
+        for row in data:
+            key = (row['chat_id'], row.get('thread_id', 0))
+            if key not in seen:
+                seen.add(key)
+                unique.append(row)
+        if len(unique) != len(data):
+            logging.info(f"🧹 Удалены дубликаты чатов: было {len(data)}, стало {len(unique)}")
+        return unique
     except Exception as e:
         logging.error(f"Ошибка загрузки чатов: {e}")
         return []
@@ -58,7 +69,6 @@ def get_last_post_id():
         if response.data:
             return int(response.data[0]['value'])
         else:
-            # Если записи нет, создаём
             supabase.table('state').insert({'key': 'last_post_id', 'value': '0'}).execute()
             return 0
     except Exception as e:
@@ -68,6 +78,7 @@ def get_last_post_id():
 def save_last_post_id(post_id):
     try:
         supabase.table('state').update({'value': str(post_id)}).eq('key', 'last_post_id').execute()
+        logging.info(f"💾 Сохранён last_post_id: {post_id}")
     except Exception as e:
         logging.error(f"Ошибка сохранения last_post_id: {e}")
 
@@ -110,11 +121,14 @@ def send_to_all_chats(file_path, chats, caption=None, sent_files=None):
     if sent_files is None:
         sent_files = set()
     if file_path in sent_files:
+        logging.info(f"⏩ Файл {file_path} уже отправлен в этом цикле, пропускаем")
         return
     sent_files.add(file_path)
+
     for chat in chats:
         chat_id = chat['chat_id']
         thread_id = chat.get('thread_id', 0)
+        logging.info(f"📤 Отправка {file_path} в чат {chat_id}, тема {thread_id}")
         send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
 
 def send_text_to_all_chats(text, chats):
@@ -232,10 +246,11 @@ def main():
                 post_id = post['id']
                 if post_id <= last_post_id:
                     continue
+
+                # Обновляем last_post_id и сразу сохраняем
                 last_post_id = post_id
-                logging.info(f"📝 Новый пост #{post_id}")
-                # Сохраняем новый ID сразу после обработки
                 save_last_post_id(last_post_id)
+                logging.info(f"📝 Новый пост #{post_id}")
 
                 post_text = post.get('text', '')
                 caption = post_text[:1024] if post_text else None
