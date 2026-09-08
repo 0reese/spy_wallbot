@@ -10,8 +10,8 @@ import threading
 
 # ===== НАСТРОЙКИ =====
 VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
-USER_ID = "1128567349"
-CHECK_INTERVAL = 30
+USER_ID = "185796802"
+CHECK_INTERVAL = 60
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
 
 # ==== Настройки Supabase ====
@@ -92,6 +92,13 @@ def get_last_post_id():
         else:
             supabase.table('state').insert({'key': 'last_post_id', 'value': '0'}).execute()
             return 0
+except Exception as e:
+            if "Flood control" in str(e):
+                logging.warning("⚠️ VK ограничил частоту запросов. Увеличиваю паузу на 5 минут.")
+                time.sleep(300)  # ждём 5 минут
+            else:
+                logging.error(f"Ошибка VK: {e}")
+                time.sleep(5)
     except Exception as e:
         logging.error(f"Ошибка загрузки last_post_id: {e}")
         return 0
