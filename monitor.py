@@ -8,22 +8,20 @@ from supabase import create_client, Client
 from flask import Flask
 import threading
 
-# ===== НАСТРОЙКИ =====
-VK_TOKEN = "vk1.a.SSAhcoSsS1CwjV5UcyjFIsyiwYMuQMtihAuAkpkxeg_CAnzXur0bDeArjJHMD9RSsMZqkENVrRdyf-2mvfuUFLYG5BoIGTGlKORCCMRk8mluRHiUJuraYkEDhhmZ7-6uVv5ZsdvUfZSuT2fyOssFyHfHBT7-N_NxH5r_vWFwx3fk-3JDV6XlpmqCRCQpwfTxoHNyX-xrRmhF_btGcutcgA"
-USER_ID = "185796802"
-CHECK_INTERVAL = 60
-BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
+# ===================== НАСТРОЙКИ =====================
+VK_TOKEN = "185796802"               # замените
+USER_ID = "1128567349"                  # ID страницы ВК
+CHECK_INTERVAL = 60                     # секунд между проверками
+BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"            # замените
 
-# ==== Настройки Supabase ====
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
-SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"   # замените на ваш
-# ==========================
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
+SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"          # замените (anon public)
+# ====================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Flask-сервер для пингов ---
+# ---------------- Flask для пингов ----------------
 app = Flask(__name__)
 
 @app.route('/ping')
@@ -37,11 +35,12 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=10000)
 
-# --- Функции работы с БД (чаты) ---
+# ---------- Работа с Supabase (чаты, состояние) ----------
 def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
         data = response.data
+        # Удаляем дубликаты на случай, если они есть
         seen = set()
         unique = []
         for row in data:
@@ -49,8 +48,6 @@ def get_chats():
             if key not in seen:
                 seen.add(key)
                 unique.append(row)
-        if len(unique) != len(data):
-            logging.info(f"🧹 Удалены дубликаты чатов: было {len(data)}, стало {len(unique)}")
         return unique
     except Exception as e:
         logging.error(f"Ошибка загрузки чатов: {e}")
@@ -59,16 +56,19 @@ def get_chats():
 def add_chat(chat_id, thread_id=None):
     if thread_id is None:
         thread_id = 0
+
     # Если добавляем тему, удаляем запись для общего чата
     if thread_id != 0:
         supabase.table('chats').delete().eq('chat_id', chat_id).eq('thread_id', 0).execute()
     else:
         # Если добавляем общий чат, удаляем все темы
         supabase.table('chats').delete().eq('chat_id', chat_id).neq('thread_id', 0).execute()
+
     existing = supabase.table('chats').select('*') \
         .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
     if existing.data:
         return False
+
     data = {'chat_id': chat_id, 'thread_id': thread_id}
     supabase.table('chats').insert(data).execute()
     logging.info(f"➕ Чат добавлен: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
@@ -77,13 +77,10 @@ def add_chat(chat_id, thread_id=None):
 def remove_chat(chat_id, thread_id=None):
     if thread_id is None:
         thread_id = 0
-    query = supabase.table('chats').delete() \
-        .eq('chat_id', chat_id).eq('thread_id', thread_id)
-    result = query.execute()
-    if result.data:
-        logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
+    supabase.table('chats').delete() \
+        .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
+    logging.info(f"➖ Чат удалён: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
 
-# --- Функции для работы с состоянием (last_post_id) ---
 def get_last_post_id():
     try:
         response = supabase.table('state').select('value').eq('key', 'last_post_id').execute()
@@ -92,13 +89,6 @@ def get_last_post_id():
         else:
             supabase.table('state').insert({'key': 'last_post_id', 'value': '0'}).execute()
             return 0
-except Exception as e:
-            if "Flood control" in str(e):
-                logging.warning("⚠️ VK ограничил частоту запросов. Увеличиваю паузу на 5 минут.")
-                time.sleep(300)  # ждём 5 минут
-            else:
-                logging.error(f"Ошибка VK: {e}")
-                time.sleep(5)
     except Exception as e:
         logging.error(f"Ошибка загрузки last_post_id: {e}")
         return 0
@@ -110,7 +100,7 @@ def save_last_post_id(post_id):
     except Exception as e:
         logging.error(f"Ошибка сохранения last_post_id: {e}")
 
-# --- Отправка сообщений ---
+# ---------- Отправка сообщений в Telegram ----------
 def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     if thread_id and thread_id != 0:
@@ -149,14 +139,11 @@ def send_to_all_chats(file_path, chats, caption=None, sent_files=None):
     if sent_files is None:
         sent_files = set()
     if file_path in sent_files:
-        logging.info(f"⏩ Файл {file_path} уже отправлен в этом цикле, пропускаем")
         return
     sent_files.add(file_path)
-
     for chat in chats:
         chat_id = chat['chat_id']
         thread_id = chat.get('thread_id', 0)
-        logging.info(f"📤 Отправка {file_path} в чат {chat_id}, тема {thread_id}")
         send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
 
 def send_text_to_all_chats(text, chats):
@@ -165,7 +152,7 @@ def send_text_to_all_chats(text, chats):
         thread_id = chat.get('thread_id', 0)
         send_text(chat_id, text, thread_id)
 
-# --- Обработка обновлений Telegram ---
+# ---------- Обработка команд Telegram ----------
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -189,7 +176,7 @@ def handle_updates(offset):
                     if add_chat(chat_id, thread_id):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
                     else:
-                        logging.info(f"ℹ️ Чат {chat_id} уже активирован, повторный /start игнорируется")
+                        logging.info(f"ℹ️ Чат {chat_id} уже активирован")
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
@@ -198,7 +185,7 @@ def handle_updates(offset):
                     if add_chat(chat_id, None):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.')
                     else:
-                        logging.info(f"ℹ️ Канал {chat_id} уже активирован, повторный /start игнорируется")
+                        logging.info(f"ℹ️ Канал {chat_id} уже активирован")
         with open('offset.txt', 'w') as f:
             f.write(str(new_offset))
         return new_offset
@@ -206,7 +193,7 @@ def handle_updates(offset):
         logging.error(f"Ошибка получения обновлений: {e}")
         return offset
 
-# --- VK и обработка постов ---
+# ---------- Обработка вложений VK ----------
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
 
@@ -248,13 +235,13 @@ def process_attachment(att, post_id, chats, caption, sent_files):
         full_text = f"{caption}\n\n{text}" if caption else text
         send_text_to_all_chats(full_text, chats)
 
+# ---------- Основной цикл ----------
 def main():
-    # Запускаем Flask-сервер в отдельном потоке
+    # Запускаем Flask-сервер для пингов
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logging.info("🌐 Flask-сервер запущен на порту 10000")
 
-    # Загружаем last_post_id из Supabase
     last_post_id = get_last_post_id()
     logging.info(f"📌 Загружен last_post_id: {last_post_id}")
 
@@ -297,7 +284,12 @@ def main():
                         send_text_to_all_chats(f"📄 Новый пост #{post_id}:\n{full_text}", chats)
 
         except Exception as e:
-            logging.error(f"Ошибка VK: {e}")
+            if "Flood control" in str(e):
+                logging.warning("⚠️ VK ограничил частоту запросов. Пауза 5 минут.")
+                time.sleep(300)
+            else:
+                logging.error(f"Ошибка VK: {e}")
+                time.sleep(5)
 
         time.sleep(CHECK_INTERVAL)
 
