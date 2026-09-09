@@ -95,7 +95,7 @@ def save_last_post_id(post_id):
     except Exception as e:
         logging.error(f"Ошибка сохранения last_post_id: {e}")
 
-# ---------- Функции для режимов (меню) ----------
+# ---------- Функции для режимов ----------
 def get_mode(user_id):
     try:
         response = supabase.table('settings').select('mode').eq('user_id', user_id).execute()
@@ -236,10 +236,10 @@ def forward_owner_message(msg, chats):
             send_to_all_chats_file(local_file, chats, caption=text, file_type='document')
             os.remove(local_file)
 
-# ---------- ГЛОБАЛЬНЫЙ СЛОВАРЬ ДЛЯ ОТВЕТОВ ----------
+# ---------- Глобальный словарь для ответов ----------
 forwarded_map = {}
 
-# ---------- Обработка обновлений Telegram ----------
+# ---------- Обработка обновлений Telegram (в отдельном потоке) ----------
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -258,14 +258,14 @@ def handle_updates(offset):
 
         new_offset = updates[-1]['update_id'] + 1
 
-        # ✅ Ключевое исправление: сохраняем offset сразу после получения обновлений
+        # Сохраняем offset сразу после получения обновлений
         with open('offset.txt', 'w') as f:
             f.write(str(new_offset))
         logging.info(f"💾 Сохранён offset: {new_offset}")
 
-        # Теперь обрабатываем обновления
+        # Обрабатываем обновления
         for upd in updates:
-            # Обработка нажатий на кнопки
+            # Callback-запросы
             if 'callback_query' in upd:
                 query = upd['callback_query']
                 user_id = query['from']['id']
@@ -293,7 +293,7 @@ def handle_updates(offset):
                     answer_callback(callback_id, f"Текущий режим: {current_mode}", show_alert=True)
                 continue
 
-            # Обработка сообщений
+            # Сообщения
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
@@ -311,7 +311,7 @@ def handle_updates(offset):
                         logging.info(f"ℹ️ Чат {chat_id} уже активирован")
                     continue
 
-                # Команда /menu (только для владельца)
+                # Команда /menu (только владелец)
                 if from_user_id == OWNER_ID and text == '/menu':
                     keyboard = {
                         "inline_keyboard": [
@@ -327,11 +327,10 @@ def handle_updates(offset):
                     send_text(chat_id, "Выберите режим работы бота:", thread_id, reply_markup=keyboard)
                     continue
 
-                # --- Сообщения от владельца ---
+                # Сообщения от владельца
                 if from_user_id == OWNER_ID:
                     current_mode = get_mode(OWNER_ID)
 
-                    # Если владелец отвечает на пересланное сообщение
                     if reply_to:
                         original_msg_id = reply_to.get('message_id')
                         if original_msg_id in forwarded_map:
@@ -345,7 +344,6 @@ def handle_updates(offset):
                         else:
                             send_text(chat_id, "❌ Не могу найти, кому ответить (возможно, сообщение не было переслано мной)")
                     else:
-                        # Не reply — либо рассылка, либо игнор
                         if current_mode == 'broadcast':
                             chats = get_chats()
                             if chats:
@@ -354,11 +352,10 @@ def handle_updates(offset):
                             else:
                                 send_text(chat_id, "❌ Нет активных чатов для рассылки")
                         else:
-                            # Режим ответа, но без reply — напоминаем
                             send_text(chat_id, "ℹ️ Вы в режиме ответа. Чтобы ответить пользователю, используйте reply на пересланное сообщение. Для рассылки переключитесь в режим рассылки через /menu.")
                     continue
 
-                # --- Сообщение от другого пользователя (не владельца) в личку бота ---
+                # Сообщение от другого пользователя в личку бота
                 if chat_id == from_user_id:
                     try:
                         forward_url = f"https://api.telegram.org/bot{BOT_TOKEN}/forwardMessage"
@@ -377,11 +374,10 @@ def handle_updates(offset):
                             logging.error(f"Ошибка пересылки: {resp.text}")
                     except Exception as e:
                         logging.error(f"Ошибка пересылки: {e}")
-
-                # Сообщения из групп/каналов от других пользователей — игнорируем
                 else:
                     logging.info(f"Сообщение из чата {chat_id} от {from_user_id} игнорировано (не личка)")
 
+            # Посты в каналах
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
@@ -397,6 +393,21 @@ def handle_updates(offset):
     except Exception as e:
         logging.error(f"Ошибка получения обновлений: {e}")
         return offset
+
+# ---------- Функция для непрерывного опроса Telegram ----------
+def telegram_polling():
+    # Загружаем offset из файла (или начинаем с 0)
+    try:
+        with open('offset.txt', 'r') as f:
+            offset = int(f.read().strip())
+            logging.info(f"📌 Загружен offset для потока: {offset}")
+    except:
+        offset = 0
+        logging.info(f"📌 Начальный offset: {offset}")
+
+    while True:
+        offset = handle_updates(offset)
+        time.sleep(1)  # небольшая пауза между запросами
 
 # ---------- VK и обработка постов ----------
 vk_session = vk_api.VkApi(token=VK_TOKEN)
@@ -445,31 +456,28 @@ def process_attachment(att, post_id, chats, caption, sent_files):
         full_text = f"{caption}\n\n{text}" if caption else text
         send_text_to_all_chats(full_text, chats)
 
-# ---------- Основной цикл ----------
+# ---------- Основной цикл (VK мониторинг) ----------
 def main():
+    # Запускаем Flask для пингов
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logging.info("🌐 Flask-сервер запущен на порту 10000")
 
+    # Запускаем отдельный поток для непрерывного опроса Telegram
+    telegram_thread = threading.Thread(target=telegram_polling, daemon=True)
+    telegram_thread.start()
+    logging.info("🤖 Поток для Telegram запущен")
+
+    # Загружаем last_post_id
     last_post_id = get_last_post_id()
     logging.info(f"📌 Загружен last_post_id: {last_post_id}")
-
-    # Принудительно сбрасываем offset, чтобы обработать все новые сообщения
-    # После того как бот начнёт стабильно работать, можно заменить на загрузку из файла
-    try:
-        with open('offset.txt', 'r') as f:
-            offset = int(f.read().strip())
-            logging.info(f"📌 Загружен offset из файла: {offset}")
-    except:
-        offset = 0
-        logging.info(f"📌 Установлен начальный offset: 0")
 
     chats = get_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
 
+    # Основной цикл мониторинга VK
     while True:
-        offset = handle_updates(offset)
-        chats = get_chats()
+        chats = get_chats()  # обновляем список чатов
         sent_files = set()
 
         try:
