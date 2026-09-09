@@ -9,16 +9,14 @@ from flask import Flask
 import threading
 
 # ===================== НАСТРОЙКИ =====================
-# --- Замените эти значения на свои ---
-VK_TOKEN = "vk1.a.TDcvwSQk5BNF8NMHLSiFI6ZeUp6gK5Cou74fAHHKCdu6ugiQxz91WPro5YxE7wFUh1Fknk8uOe-ileqIIx1JD7LbDuGYUzAm-E8mTSKTujSS73MYsWgnyMjsm8kYls0QWJHsLEMp93jYpvkahZAFHA26k6PqkMP-OJASC0ru4gRlFMR9NSxgJWTiYZjbdOXmDFOJtjMEOHnOsL8E27d2BA"        # полученный через vkhost или OAuth с offline
-USER_ID = "185796802"                     # ID страницы ВК, которую мониторим
-CHECK_INTERVAL = 60                        # секунд между проверками
-BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"      # от @BotFather
-OWNER_ID = 1104584938                      # ваш личный Telegram ID
+VK_TOKEN = "vk1.a.TDcvwSQk5BNF8NMHLSiFI6ZeUp6gK5Cou74fAHHKCdu6ugiQxz91WPro5YxE7wFUh1Fknk8uOe-ileqIIx1JD7LbDuGYUzAm-E8mTSKTujSS73MYsWgnyMjsm8kYls0QWJHsLEMp93jYpvkahZAFHA26k6PqkMP-OJASC0ru4gRlFMR9NSxgJWTiYZjbdOXmDFOJtjMEOHnOsL8E27d2BA"           # замените
+USER_ID = "185796802"                        # ID страницы ВК
+CHECK_INTERVAL = 60
+BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"         # замените
+OWNER_ID = 1104584938                         # ваш Telegram ID
 
-# --- Supabase (замените) ---
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
-SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"   # anon public ключ
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
+SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"          # замените
 # ====================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -43,7 +41,6 @@ def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
         data = response.data
-        # Удаляем дубликаты
         seen = set()
         unique = []
         for row in data:
@@ -59,7 +56,6 @@ def get_chats():
 def add_chat(chat_id, thread_id=None):
     if thread_id is None:
         thread_id = 0
-    # Если добавляем тему, удаляем запись для общего чата
     if thread_id != 0:
         supabase.table('chats').delete().eq('chat_id', chat_id).eq('thread_id', 0).execute()
     else:
@@ -99,28 +95,52 @@ def save_last_post_id(post_id):
     except Exception as e:
         logging.error(f"Ошибка сохранения last_post_id: {e}")
 
+# ---------- Функции для режимов (меню) ----------
+def get_mode(user_id):
+    try:
+        response = supabase.table('settings').select('mode').eq('user_id', user_id).execute()
+        if response.data:
+            return response.data[0]['mode']
+        else:
+            supabase.table('settings').insert({'user_id': user_id, 'mode': 'reply'}).execute()
+            return 'reply'
+    except Exception as e:
+        logging.error(f"Ошибка получения режима: {e}")
+        return 'reply'
+
+def set_mode(user_id, mode):
+    try:
+        supabase.table('settings').update({'mode': mode}).eq('user_id', user_id).execute()
+        logging.info(f"🔄 Режим для {user_id} изменён на {mode}")
+    except Exception as e:
+        logging.error(f"Ошибка сохранения режима: {e}")
+
 # ---------- Отправка в Telegram ----------
-def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
+def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     if thread_id and thread_id != 0:
         if data is None:
             data = {}
         data['message_thread_id'] = thread_id
+    if reply_markup:
+        if data is None:
+            data = {}
+        data['reply_markup'] = json.dumps(reply_markup)
     try:
         if files:
             response = requests.post(url, files=files, data=data, timeout=30)
         else:
             response = requests.post(url, data=data, timeout=30)
         if response.status_code == 200:
-            return True
+            return response.json()
         else:
             logging.error(f"❌ Ошибка в {chat_id} (тема {thread_id}): {response.text}")
             if response.status_code in [403, 404] or (response.status_code == 400 and "TOPIC_CLOSED" in response.text):
                 remove_chat(chat_id, thread_id)
-            return False
+            return None
     except Exception as e:
         logging.error(f"❌ Ошибка отправки в {chat_id} (тема {thread_id}): {e}")
-        return False
+        return None
 
 def send_document(chat_id, file_path, caption=None, thread_id=None):
     with open(file_path, 'rb') as f:
@@ -138,9 +158,27 @@ def send_photo(chat_id, file_path, caption=None, thread_id=None):
             data['caption'] = caption
         return send_message_to_chat(chat_id, 'sendPhoto', data=data, files=files, thread_id=thread_id)
 
-def send_text(chat_id, text, thread_id=None):
+def send_text(chat_id, text, thread_id=None, reply_markup=None):
     data = {'chat_id': chat_id, 'text': text}
-    return send_message_to_chat(chat_id, 'sendMessage', data=data, thread_id=thread_id)
+    return send_message_to_chat(chat_id, 'sendMessage', data=data, thread_id=thread_id, reply_markup=reply_markup)
+
+def answer_callback(callback_id, text, show_alert=False):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
+    data = {'callback_query_id': callback_id, 'text': text, 'show_alert': show_alert}
+    try:
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        logging.error(f"Ошибка ответа на callback: {e}")
+
+def edit_message_text(chat_id, message_id, text, reply_markup=None):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+    data = {'chat_id': chat_id, 'message_id': message_id, 'text': text}
+    if reply_markup:
+        data['reply_markup'] = json.dumps(reply_markup)
+    try:
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        logging.error(f"Ошибка редактирования сообщения: {e}")
 
 def send_to_all_chats_file(file_path, chats, caption=None, file_type='document'):
     for chat in chats:
@@ -199,6 +237,8 @@ def forward_owner_message(msg, chats):
             os.remove(local_file)
 
 # ---------- Обработка обновлений Telegram ----------
+forwarded_map = {}
+
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -212,25 +252,124 @@ def handle_updates(offset):
         if not updates:
             return offset
         new_offset = updates[-1]['update_id'] + 1
+
         for upd in updates:
+            # Обработка нажатий на кнопки
+            if 'callback_query' in upd:
+                query = upd['callback_query']
+                user_id = query['from']['id']
+                callback_id = query['id']
+                data_cb = query.get('data')
+                msg_chat_id = query['message']['chat']['id']
+                msg_message_id = query['message']['message_id']
+
+                if user_id != OWNER_ID:
+                    answer_callback(callback_id, "❌ Только владелец может менять режим", show_alert=True)
+                    continue
+
+                if data_cb == 'mode_reply':
+                    set_mode(user_id, 'reply')
+                    answer_callback(callback_id, "✅ Режим изменён на 'Ответ'")
+                    edit_message_text(msg_chat_id, msg_message_id,
+                                     "✅ Режим: **Ответ** (основной).\nТеперь вы отвечаете пользователям через reply на пересланные сообщения. Новые сообщения без reply игнорируются.")
+                elif data_cb == 'mode_broadcast':
+                    set_mode(user_id, 'broadcast')
+                    answer_callback(callback_id, "✅ Режим изменён на 'Рассылка'")
+                    edit_message_text(msg_chat_id, msg_message_id,
+                                     "✅ Режим: **Рассылка** (дополнительный).\nЛюбое ваше сообщение (не в ответ на пересланное) будет отправлено во все чаты.")
+                elif data_cb == 'show_mode':
+                    current_mode = get_mode(user_id)
+                    answer_callback(callback_id, f"Текущий режим: {current_mode}", show_alert=True)
+                continue
+
+            # Обработка сообщений
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
                 thread_id = msg.get('message_thread_id')
                 from_user_id = msg.get('from', {}).get('id')
+                reply_to = msg.get('reply_to_message')
+
+                # Команда /start
                 if text == '/start':
                     if add_chat(chat_id, thread_id):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
                     else:
                         logging.info(f"ℹ️ Чат {chat_id} уже активирован")
-                elif from_user_id == OWNER_ID and not text.startswith('/'):
-                    chats = get_chats()
-                    if chats:
-                        forward_owner_message(msg, chats)
-                        send_text(chat_id, f"✅ Сообщение отправлено в {len(chats)} чатов")
+                    continue
+
+                # Команда /menu (только для владельца)
+                if from_user_id == OWNER_ID and text == '/menu':
+                    keyboard = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "📝 Режим: Ответ", "callback_data": "mode_reply"},
+                                {"text": "📢 Режим: Рассылка", "callback_data": "mode_broadcast"}
+                            ],
+                            [
+                                {"text": "ℹ️ Текущий режим", "callback_data": "show_mode"}
+                            ]
+                        ]
+                    }
+                    send_text(chat_id, "Выберите режим работы бота:", thread_id, reply_markup=keyboard)
+                    continue
+
+                # --- Сообщения от владельца ---
+                if from_user_id == OWNER_ID:
+                    current_mode = get_mode(OWNER_ID)
+
+                    # Если владелец отвечает на пересланное сообщение
+                    if reply_to:
+                        original_msg_id = reply_to.get('message_id')
+                        if original_msg_id in forwarded_map:
+                            original_user = forwarded_map[original_msg_id]
+                            if text:
+                                send_text(original_user, f"Ответ от владельца:\n{text}")
+                                send_text(chat_id, f"✅ Ответ отправлен пользователю {original_user}")
+                                del forwarded_map[original_msg_id]
+                            else:
+                                send_text(chat_id, "❌ Пустое сообщение не отправлено")
+                        else:
+                            send_text(chat_id, "❌ Не могу найти, кому ответить (возможно, сообщение не было переслано мной)")
                     else:
-                        send_text(chat_id, "❌ Нет активных чатов для рассылки")
+                        # Не reply — либо рассылка, либо игнор
+                        if current_mode == 'broadcast':
+                            chats = get_chats()
+                            if chats:
+                                forward_owner_message(msg, chats)
+                                send_text(chat_id, f"✅ Сообщение отправлено в {len(chats)} чатов")
+                            else:
+                                send_text(chat_id, "❌ Нет активных чатов для рассылки")
+                        else:
+                            # Режим ответа, но без reply — напоминаем
+                            send_text(chat_id, "ℹ️ Вы в режиме ответа. Чтобы ответить пользователю, используйте reply на пересланное сообщение. Для рассылки переключитесь в режим рассылки через /menu.")
+                    continue
+
+                # --- Сообщение от другого пользователя (не владельца) в личку бота ---
+                if chat_id == from_user_id:
+                    try:
+                        forward_url = f"https://api.telegram.org/bot{BOT_TOKEN}/forwardMessage"
+                        data = {
+                            'chat_id': OWNER_ID,
+                            'from_chat_id': chat_id,
+                            'message_id': msg['message_id']
+                        }
+                        resp = requests.post(forward_url, data=data, timeout=10)
+                        if resp.status_code == 200:
+                            forwarded_data = resp.json()
+                            forwarded_msg_id = forwarded_data['result']['message_id']
+                            forwarded_map[forwarded_msg_id] = chat_id
+                            logging.info(f"📩 Переслано сообщение от {from_user_id} владельцу (forward_id={forwarded_msg_id})")
+                        else:
+                            logging.error(f"Ошибка пересылки: {resp.text}")
+                    except Exception as e:
+                        logging.error(f"Ошибка пересылки: {e}")
+
+                # Сообщения из групп/каналов от других пользователей — игнорируем
+                else:
+                    logging.info(f"Сообщение из чата {chat_id} от {from_user_id} игнорировано (не личка)")
+
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
@@ -240,6 +379,7 @@ def handle_updates(offset):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.')
                     else:
                         logging.info(f"ℹ️ Канал {chat_id} уже активирован")
+
         with open('offset.txt', 'w') as f:
             f.write(str(new_offset))
         return new_offset
