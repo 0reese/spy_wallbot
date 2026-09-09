@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from flask import Flask
 import threading
 
-# ===================== НАСТРОЙКИ =====================
+# ===================== НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ) =====================
 VK_TOKEN = "vk1.a._7jyp-62jkBPJK5uS0TEZYgoEDKOVwd9ggjIw914efvyOCrExoOmpn6bLLWGcyQtvfCB14a4A-eQ5MPerELhBMGnwBTGml1DznhG5DPVZ1N0Hv_7r12oysJRu7c3mD5RzX6kRjN_G7jP9vFVXthaQfX0prB6GqSjsEqktXZFAWWjtxRr9N05AVpRHnqiyQtck55zPKrrIQihoHw0DyIIvQ"           # замените
 USER_ID = "185796802"                        # ID страницы ВК
 CHECK_INTERVAL = 60
@@ -16,9 +16,8 @@ BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"         # заме�
 OWNER_ID = 1104584938                         # ваш Telegram ID
 
 SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
-SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"          # замените
-# ====================================================
-
+SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"# anon public ключ
+# =======================================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -237,9 +236,10 @@ def forward_owner_message(msg, chats):
             send_to_all_chats_file(local_file, chats, caption=text, file_type='document')
             os.remove(local_file)
 
-# ---------- Обработка обновлений Telegram ----------
+# ---------- ГЛОБАЛЬНЫЙ СЛОВАРЬ ДЛЯ ОТВЕТОВ ----------
 forwarded_map = {}
 
+# ---------- Обработка обновлений Telegram ----------
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -258,23 +258,12 @@ def handle_updates(offset):
 
         new_offset = updates[-1]['update_id'] + 1
 
-        # 🔥 Ключевое изменение: сохраняем offset сразу после получения обновлений
+        # ✅ Ключевое исправление: сохраняем offset сразу после получения обновлений
         with open('offset.txt', 'w') as f:
             f.write(str(new_offset))
-            logging.info(f"📌 Начальный offset: {offset}")
+        logging.info(f"💾 Сохранён offset: {new_offset}")
 
         # Теперь обрабатываем обновления
-        for upd in updates:
-            # ... вся обработка сообщений, callback_query, channel_post ...
-            # (оставьте без изменений всё, что ниже)
-            # ...
-
-        return new_offset
-    except Exception as e:
-        logging.error(f"Ошибка получения обновлений: {e}")
-        return offset
-        new_offset = updates[-1]['update_id'] + 1
-
         for upd in updates:
             # Обработка нажатий на кнопки
             if 'callback_query' in upd:
@@ -404,8 +393,6 @@ def handle_updates(offset):
                         send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.')
                         logging.info(f"ℹ️ Канал {chat_id} уже активирован")
 
-        with open('offset.txt', 'w') as f:
-            f.write(str(new_offset))
         return new_offset
     except Exception as e:
         logging.error(f"Ошибка получения обновлений: {e}")
@@ -468,8 +455,14 @@ def main():
     logging.info(f"📌 Загружен last_post_id: {last_post_id}")
 
     # Принудительно сбрасываем offset, чтобы обработать все новые сообщения
-    offset = 0
-    logging.info(f"📌 Установлен offset: {offset} (принудительно для диагностики)")
+    # После того как бот начнёт стабильно работать, можно заменить на загрузку из файла
+    try:
+        with open('offset.txt', 'r') as f:
+            offset = int(f.read().strip())
+            logging.info(f"📌 Загружен offset из файла: {offset}")
+    except:
+        offset = 0
+        logging.info(f"📌 Установлен начальный offset: 0")
 
     chats = get_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
