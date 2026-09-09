@@ -255,6 +255,24 @@ def handle_updates(offset):
             logging.info(f"Обновление: {upd}")
         if not updates:
             return offset
+
+        new_offset = updates[-1]['update_id'] + 1
+
+        # 🔥 Ключевое изменение: сохраняем offset сразу после получения обновлений
+        with open('offset.txt', 'w') as f:
+            f.write(str(new_offset))
+            logging.info(f"📌 Начальный offset: {offset}")
+
+        # Теперь обрабатываем обновления
+        for upd in updates:
+            # ... вся обработка сообщений, callback_query, channel_post ...
+            # (оставьте без изменений всё, что ниже)
+            # ...
+
+        return new_offset
+    except Exception as e:
+        logging.error(f"Ошибка получения обновлений: {e}")
+        return offset
         new_offset = updates[-1]['update_id'] + 1
 
         for upd in updates:
