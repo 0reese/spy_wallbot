@@ -9,13 +9,16 @@ from flask import Flask
 import threading
 
 # ===================== НАСТРОЙКИ =====================
-VK_TOKEN = "vk1.a.Eft4zBddZUiyvJ4k-nKfMDfL34nFz8lr9JYHjZSuVKnx7jbQrt-vOSO_GcH1xZAFHZSl7UIA1Vm8Dp6dPjfSdRdyRb903dfAr-xXxK4Qmw-vmcet0-0wmeR5znwonYUsjVRPDi1_xyi1pNelPKQVjuPZmLsg0mjxUq-jywkpmWSkxQVySe5RMmj_EXBzYLKp_uEjeMNrHVL9z3rts-XvlQ"
-USER_ID = "185796802"
-CHECK_INTERVAL = 60                     # секунд между проверками
-BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"            # замените
+# --- Замените эти значения на свои ---
+VK_TOKEN = "ваш_бессрочный_токен_вк"        # полученный через vkhost или OAuth с offline
+USER_ID = "1128567349"                     # ID страницы ВК, которую мониторим
+CHECK_INTERVAL = 60                        # секунд между проверками
+BOT_TOKEN = "ваш_токен_бота_telegram"      # от @BotFather
+OWNER_ID = 1104584938                      # ваш личный Telegram ID
 
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
-SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"          # замените (anon public)
+# --- Supabase (замените) ---
+SUPABASE_URL = "https://ваш_проект.supabase.co"
+SUPABASE_KEY = "sb_publishable_ваш_ключ"   # anon public ключ
 # ====================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -35,12 +38,12 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=10000)
 
-# ---------- Работа с Supabase (чаты, состояние) ----------
+# ---------- Работа с Supabase ----------
 def get_chats():
     try:
         response = supabase.table('chats').select('*').execute()
         data = response.data
-        # Удаляем дубликаты на случай, если они есть
+        # Удаляем дубликаты
         seen = set()
         unique = []
         for row in data:
@@ -56,19 +59,15 @@ def get_chats():
 def add_chat(chat_id, thread_id=None):
     if thread_id is None:
         thread_id = 0
-
     # Если добавляем тему, удаляем запись для общего чата
     if thread_id != 0:
         supabase.table('chats').delete().eq('chat_id', chat_id).eq('thread_id', 0).execute()
     else:
-        # Если добавляем общий чат, удаляем все темы
         supabase.table('chats').delete().eq('chat_id', chat_id).neq('thread_id', 0).execute()
-
     existing = supabase.table('chats').select('*') \
         .eq('chat_id', chat_id).eq('thread_id', thread_id).execute()
     if existing.data:
         return False
-
     data = {'chat_id': chat_id, 'thread_id': thread_id}
     supabase.table('chats').insert(data).execute()
     logging.info(f"➕ Чат добавлен: {chat_id} (тема: {thread_id if thread_id != 0 else 'общий'})")
@@ -100,7 +99,7 @@ def save_last_post_id(post_id):
     except Exception as e:
         logging.error(f"Ошибка сохранения last_post_id: {e}")
 
-# ---------- Отправка сообщений в Telegram ----------
+# ---------- Отправка в Telegram ----------
 def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     if thread_id and thread_id != 0:
@@ -131,20 +130,26 @@ def send_document(chat_id, file_path, caption=None, thread_id=None):
             data['caption'] = caption
         return send_message_to_chat(chat_id, 'sendDocument', data=data, files=files, thread_id=thread_id)
 
+def send_photo(chat_id, file_path, caption=None, thread_id=None):
+    with open(file_path, 'rb') as f:
+        files = {'photo': f}
+        data = {'chat_id': chat_id}
+        if caption:
+            data['caption'] = caption
+        return send_message_to_chat(chat_id, 'sendPhoto', data=data, files=files, thread_id=thread_id)
+
 def send_text(chat_id, text, thread_id=None):
     data = {'chat_id': chat_id, 'text': text}
     return send_message_to_chat(chat_id, 'sendMessage', data=data, thread_id=thread_id)
 
-def send_to_all_chats(file_path, chats, caption=None, sent_files=None):
-    if sent_files is None:
-        sent_files = set()
-    if file_path in sent_files:
-        return
-    sent_files.add(file_path)
+def send_to_all_chats_file(file_path, chats, caption=None, file_type='document'):
     for chat in chats:
         chat_id = chat['chat_id']
         thread_id = chat.get('thread_id', 0)
-        send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
+        if file_type == 'photo':
+            send_photo(chat_id, file_path, caption=caption, thread_id=thread_id)
+        else:
+            send_document(chat_id, file_path, caption=caption, thread_id=thread_id)
 
 def send_text_to_all_chats(text, chats):
     for chat in chats:
@@ -152,7 +157,48 @@ def send_text_to_all_chats(text, chats):
         thread_id = chat.get('thread_id', 0)
         send_text(chat_id, text, thread_id)
 
-# ---------- Обработка команд Telegram ----------
+# ---------- Скачивание файлов из Telegram ----------
+def download_telegram_file(file_id):
+    get_file_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}"
+    resp = requests.get(get_file_url).json()
+    if not resp.get('ok'):
+        return None
+    file_path = resp['result']['file_path']
+    download_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+    local_filename = os.path.basename(file_path)
+    r = requests.get(download_url, stream=True)
+    with open(local_filename, 'wb') as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+    return local_filename
+
+# ---------- Пересылка сообщений от владельца ----------
+def forward_owner_message(msg, chats):
+    if not chats:
+        return
+    text = msg.get('text', '')
+    if text:
+        send_text_to_all_chats(text, chats)
+    if 'photo' in msg:
+        file_id = msg['photo'][-1]['file_id']
+        local_file = download_telegram_file(file_id)
+        if local_file:
+            send_to_all_chats_file(local_file, chats, caption=text, file_type='photo')
+            os.remove(local_file)
+    if 'document' in msg:
+        file_id = msg['document']['file_id']
+        local_file = download_telegram_file(file_id)
+        if local_file:
+            send_to_all_chats_file(local_file, chats, caption=text, file_type='document')
+            os.remove(local_file)
+    if 'video' in msg:
+        file_id = msg['video']['file_id']
+        local_file = download_telegram_file(file_id)
+        if local_file:
+            send_to_all_chats_file(local_file, chats, caption=text, file_type='document')
+            os.remove(local_file)
+
+# ---------- Обработка обновлений Telegram ----------
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -172,11 +218,19 @@ def handle_updates(offset):
                 chat_id = msg['chat']['id']
                 text = msg.get('text', '')
                 thread_id = msg.get('message_thread_id')
+                from_user_id = msg.get('from', {}).get('id')
                 if text == '/start':
                     if add_chat(chat_id, thread_id):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
                     else:
                         logging.info(f"ℹ️ Чат {chat_id} уже активирован")
+                elif from_user_id == OWNER_ID and not text.startswith('/'):
+                    chats = get_chats()
+                    if chats:
+                        forward_owner_message(msg, chats)
+                        send_text(chat_id, f"✅ Сообщение отправлено в {len(chats)} чатов")
+                    else:
+                        send_text(chat_id, "❌ Нет активных чатов для рассылки")
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
@@ -193,7 +247,7 @@ def handle_updates(offset):
         logging.error(f"Ошибка получения обновлений: {e}")
         return offset
 
-# ---------- Обработка вложений VK ----------
+# ---------- VK и обработка постов ----------
 vk_session = vk_api.VkApi(token=VK_TOKEN)
 vk = vk_session.get_api()
 
@@ -207,9 +261,12 @@ def process_attachment(att, post_id, chats, caption, sent_files):
             img_data = requests.get(photo_url, timeout=30).content
             with open(file_path, 'wb') as f:
                 f.write(img_data)
-            send_to_all_chats(file_path, chats, caption=caption, sent_files=sent_files)
+            send_to_all_chats_file(file_path, chats, caption=caption, file_type='photo')
         except Exception as e:
             logging.error(f"Ошибка фото: {e}")
+        finally:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
     elif att_type == 'doc':
         doc = att['doc']
         doc_url = doc.get('url')
@@ -220,7 +277,7 @@ def process_attachment(att, post_id, chats, caption, sent_files):
                     doc_data = requests.get(doc_url, timeout=60).content
                     with open(file_path, 'wb') as f:
                         f.write(doc_data)
-                    send_to_all_chats(file_path, chats, caption=caption, sent_files=sent_files)
+                    send_to_all_chats_file(file_path, chats, caption=caption, file_type='document')
                     break
                 except Exception as e:
                     logging.error(f"Попытка {attempt+1} не удалась: {e}")
@@ -228,6 +285,8 @@ def process_attachment(att, post_id, chats, caption, sent_files):
                         time.sleep(5)
                     else:
                         logging.error(f"Не удалось скачать документ")
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
     elif att_type == 'video':
         video = att['video']
         link = f"https://vk.com/video{video['owner_id']}_{video['id']}"
@@ -237,7 +296,6 @@ def process_attachment(att, post_id, chats, caption, sent_files):
 
 # ---------- Основной цикл ----------
 def main():
-    # Запускаем Flask-сервер для пингов
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logging.info("🌐 Flask-сервер запущен на порту 10000")
