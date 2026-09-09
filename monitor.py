@@ -19,6 +19,7 @@ SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
 SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"          # замените
 # ====================================================
 
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -248,7 +249,7 @@ def handle_updates(offset):
         data = resp.json()
         if not data.get('ok'):
             return offset
-   updates = data.get('result', [])
+        updates = data.get('result', [])
         logging.info(f"📩 Получено обновлений: {len(updates)}")
         for upd in updates:
             logging.info(f"Обновление: {upd}")
@@ -296,12 +297,12 @@ def handle_updates(offset):
 
                 # Команда /start
                 if text == '/start':
-    if add_chat(chat_id, thread_id):
-        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
-    else:
-        send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.', thread_id)
-        logging.info(f"ℹ️ Чат {chat_id} уже активирован")
-    continue
+                    if add_chat(chat_id, thread_id):
+                        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
+                    else:
+                        send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.', thread_id)
+                        logging.info(f"ℹ️ Чат {chat_id} уже активирован")
+                    continue
 
                 # Команда /menu (только для владельца)
                 if from_user_id == OWNER_ID and text == '/menu':
@@ -382,6 +383,7 @@ def handle_updates(offset):
                     if add_chat(chat_id, None):
                         send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.')
                     else:
+                        send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.')
                         logging.info(f"ℹ️ Канал {chat_id} уже активирован")
 
         with open('offset.txt', 'w') as f:
@@ -447,15 +449,12 @@ def main():
     last_post_id = get_last_post_id()
     logging.info(f"📌 Загружен last_post_id: {last_post_id}")
 
-    try:
-        with open('offset.txt', 'r') as f:
-            offset = int(f.read().strip())
-    except:
-        offset = 0
+    # Принудительно сбрасываем offset, чтобы обработать все новые сообщения
+    offset = 0
+    logging.info(f"📌 Установлен offset: {offset} (принудительно для диагностики)")
 
     chats = get_chats()
     logging.info(f"🚀 Бот запущен. Чатов в списке: {len(chats)}")
-    logging.info(f"📌 Текущий offset: {offset}")
 
     while True:
         offset = handle_updates(offset)
