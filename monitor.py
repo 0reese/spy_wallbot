@@ -10,15 +10,15 @@ import threading
 
 # ===================== НАСТРОЙКИ =====================
 # --- Замените эти значения на свои ---
-VK_TOKEN = "ваш_бессрочный_токен_вк"        # полученный через vkhost или OAuth с offline
-USER_ID = "1128567349"                     # ID страницы ВК, которую мониторим
+VK_TOKEN = "vk1.a.TDcvwSQk5BNF8NMHLSiFI6ZeUp6gK5Cou74fAHHKCdu6ugiQxz91WPro5YxE7wFUh1Fknk8uOe-ileqIIx1JD7LbDuGYUzAm-E8mTSKTujSS73MYsWgnyMjsm8kYls0QWJHsLEMp93jYpvkahZAFHA26k6PqkMP-OJASC0ru4gRlFMR9NSxgJWTiYZjbdOXmDFOJtjMEOHnOsL8E27d2BA"        # полученный через vkhost или OAuth с offline
+USER_ID = "185796802"                     # ID страницы ВК, которую мониторим
 CHECK_INTERVAL = 60                        # секунд между проверками
-BOT_TOKEN = "ваш_токен_бота_telegram"      # от @BotFather
+BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"      # от @BotFather
 OWNER_ID = 1104584938                      # ваш личный Telegram ID
 
 # --- Supabase (замените) ---
-SUPABASE_URL = "https://ваш_проект.supabase.co"
-SUPABASE_KEY = "sb_publishable_ваш_ключ"   # anon public ключ
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
+SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"   # anon public ключ
 # ====================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
