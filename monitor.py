@@ -248,7 +248,10 @@ def handle_updates(offset):
         data = resp.json()
         if not data.get('ok'):
             return offset
-        updates = data.get('result', [])
+   updates = data.get('result', [])
+        logging.info(f"📩 Получено обновлений: {len(updates)}")
+        for upd in updates:
+            logging.info(f"Обновление: {upd}")
         if not updates:
             return offset
         new_offset = updates[-1]['update_id'] + 1
@@ -293,11 +296,12 @@ def handle_updates(offset):
 
                 # Команда /start
                 if text == '/start':
-                    if add_chat(chat_id, thread_id):
-                        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
-                    else:
-                        logging.info(f"ℹ️ Чат {chat_id} уже активирован")
-                    continue
+    if add_chat(chat_id, thread_id):
+        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
+    else:
+        send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.', thread_id)
+        logging.info(f"ℹ️ Чат {chat_id} уже активирован")
+    continue
 
                 # Команда /menu (только для владельца)
                 if from_user_id == OWNER_ID and text == '/menu':
