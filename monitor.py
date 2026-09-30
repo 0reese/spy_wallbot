@@ -9,7 +9,7 @@ from flask import Flask
 import threading
 
 # ===================== НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ) =====================
-VK_TOKEN = "vk1.a.iRUzj1l0eIgxfB5m1YnYMIwVCuJUkoojQDBas0rS3dS84L9OOb1zRUbXI7Yk36m9UvsBRa_FnX-WtiFxJnndNQzIUe91GZm7iojOYjHF_apLvaKm-1AFypspgVAERWdp73tLlSOFoTsjTpj00F9IseFZv1uX4Iw0SgHA5Juj7ztGqro52iPHVzENjtC5A5XKNU9HBoKkdFC6VYeH59iPfA"           # замените
+VK_TOKEN = "vk1.a.kl0MDPm7CDdznlnytx0HtLIypGqtyYgboHcx-fELm5OER1LwPcNM260yvkj9WhNdkrQKRDS_FVHH-sVUjBBi5OCxyRgXd44NGNKBvSQPNevD5K7A5VEM8kwpcWsaef1fyzcjpgxXkLJ2-O9V5fUX83ZoMd_prUSr9USiydhmIGuFg-98xg4oZAdLkSJEG5WtEhtn2SvI8XF3ynIHNXhArg"           # замените
 USER_ID = "185796802"                        # ID страницы ВК
 CHECK_INTERVAL = 60
 BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"         # замените
