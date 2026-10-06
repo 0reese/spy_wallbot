@@ -5,19 +5,23 @@ import os
 import sys
 import logging
 import json
+import socket
 from supabase import create_client, Client
 from flask import Flask
 import threading
 
-# ===================== НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ) =====================
-VK_TOKEN = "vk1.a.kl0MDPm7CDdznlnytx0HtLIypGqtyYgboHcx-fELm5OER1LwPcNM260yvkj9WhNdkrQKRDS_FVHH-sVUjBBi5OCxyRgXd44NGNKBvSQPNevD5K7A5VEM8kwpcWsaef1fyzcjpgxXkLJ2-O9V5fUX83ZoMd_prUSr9USiydhmIGuFg-98xg4oZAdLkSJEG5WtEhtn2SvI8XF3ynIHNXhArg"           # замените
-USER_ID = "185796802"                        # ID страницы ВК
-CHECK_INTERVAL = 60
-BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"         # замените
-OWNER_ID = 1104584938                         # ваш Telegram ID
+# Глобальный таймаут для всех сетевых запросов (30 секунд)
+socket.setdefaulttimeout(30)
 
-SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"   # замените
-SUPABASE_KEY = "sb_publishable_91prjgAzTv4doAATEm2ehg_8b2fW_lx"# anon public ключ
+# ===================== НАСТРОЙКИ (ЗАМЕНИТЕ НА СВОИ) =====================
+VK_TOKEN = "vk1.a.L-GUuKoDiF686t_K1PeX_i_huL23RLUZiZzh9PN8MXMZ1Ob-DP9AURCh0LwfOE0yTfOA9IIjEfHNkQqf5l2PG-XvWucAKQu7pPVWgsO6BWVXEzm4SwLktJHseUGV7ywIl95nCqiCsGJB3ODUI-4dh4f-VTCG1cWD0iYA_lkDACRMgG7iv1dYVkrktq-2RMDNKh9-C_YFMPV3hxDfXgztzA"
+USER_ID = "185796802"
+CHECK_INTERVAL = 60
+BOT_TOKEN = "8888651340:AAGBkRtGJAjALGERpkB8aX2aM8pYbcScZRE"
+OWNER_ID = 1104584938
+
+SUPABASE_URL = "https://dsbdjnxmhpeforcvqqep.supabase.co"
+SUPABASE_KEY = "sb_publishable_RJoQY-6Nbiuq5H4NtwGAbg_YqjxAMYT"
 # =======================================================================
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -43,7 +47,6 @@ def run_flask():
 
 # ---------------- Watchdog ----------------
 def watchdog():
-    """Перезапускает процесс, если нет активности более 10 минут"""
     global last_activity
     while True:
         time.sleep(60)
@@ -151,7 +154,7 @@ def get_mode(user_id):
 def set_mode(user_id, mode):
     try:
         supabase.table('settings').update({'mode': mode}).eq('user_id', user_id).execute()
-        logging.info(f"🔄 Режим для {user_id} изменён на {mode}")
+        logging.info(f"🔄 Режим {user_id} → {mode}")
     except Exception as e:
         logging.error(f"Ошибка сохранения режима: {e}")
 
@@ -179,7 +182,7 @@ def send_message_to_chat(chat_id, method, data=None, files=None, thread_id=None,
                 remove_chat(chat_id, thread_id)
             return None
     except Exception as e:
-        logging.error(f"❌ Ошибка отправки в {chat_id} (тема {thread_id}): {e}")
+        logging.error(f"❌ Ошибка отправки в {chat_id}: {e}")
         return None
 
 def send_document(chat_id, file_path, caption=None, thread_id=None):
@@ -208,7 +211,7 @@ def answer_callback(callback_id, text, show_alert=False):
     try:
         requests.post(url, data=data, timeout=10)
     except Exception as e:
-        logging.error(f"Ошибка ответа на callback: {e}")
+        logging.error(f"Ошибка callback: {e}")
 
 def edit_message_text(chat_id, message_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
@@ -218,7 +221,7 @@ def edit_message_text(chat_id, message_id, text, reply_markup=None):
     try:
         requests.post(url, data=data, timeout=10)
     except Exception as e:
-        logging.error(f"Ошибка редактирования сообщения: {e}")
+        logging.error(f"Ошибка edit: {e}")
 
 def send_to_all_chats_file(file_path, chats, caption=None, file_type='document'):
     for chat in chats:
@@ -250,7 +253,7 @@ def download_telegram_file(file_id):
             f.write(chunk)
     return local_filename
 
-# ---------- Пересылка сообщений владельца во все чаты ----------
+# ---------- Пересылка сообщений владельца ----------
 def forward_owner_message(msg, chats):
     if not chats:
         return
@@ -276,7 +279,7 @@ def forward_owner_message(msg, chats):
             send_to_all_chats_file(local_file, chats, caption=text, file_type='document')
             os.remove(local_file)
 
-# ---------- Обработка обновлений Telegram ----------
+# ---------- Обработка Telegram-обновлений ----------
 def handle_updates(offset):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
@@ -295,7 +298,7 @@ def handle_updates(offset):
             f.write(str(new_offset))
 
         for upd in updates:
-            # --- Callback ---
+            # Callback-кнопки
             if 'callback_query' in upd:
                 query = upd['callback_query']
                 user_id = query['from']['id']
@@ -305,28 +308,24 @@ def handle_updates(offset):
                 msg_message_id = query['message']['message_id']
 
                 if user_id != OWNER_ID:
-                    answer_callback(callback_id, "❌ Только владелец может менять настройки", show_alert=True)
+                    answer_callback(callback_id, "❌ Только владелец", show_alert=True)
                     continue
 
                 if data_cb == 'mode_reply':
                     set_mode(user_id, 'reply')
                     answer_callback(callback_id, "✅ Режим: Ответ")
-                    edit_message_text(msg_chat_id, msg_message_id,
-                        "✅ Режим: **Ответ** (основной).\nОтвечайте через reply на пересланные сообщения.")
+                    edit_message_text(msg_chat_id, msg_message_id, "✅ Режим: Ответ (основной).")
                 elif data_cb == 'mode_broadcast':
                     set_mode(user_id, 'broadcast')
                     answer_callback(callback_id, "✅ Режим: Рассылка")
-                    edit_message_text(msg_chat_id, msg_message_id,
-                        "✅ Режим: **Рассылка** (дополнительный).\nЛюбое ваше сообщение уйдёт во все чаты.")
+                    edit_message_text(msg_chat_id, msg_message_id, "✅ Режим: Рассылка (дополнительный).")
                 elif data_cb == 'show_mode':
-                    current_mode = get_mode(user_id)
-                    answer_callback(callback_id, f"Текущий режим: {current_mode}", show_alert=True)
+                    answer_callback(callback_id, f"Режим: {get_mode(user_id)}", show_alert=True)
                 elif data_cb == 'show_page':
-                    current = get_user_id()
-                    answer_callback(callback_id, f"Страница ВК: {current}\nСменить: /setpage <ID>", show_alert=True)
+                    answer_callback(callback_id, f"Страница: {get_user_id()}", show_alert=True)
                 continue
 
-            # --- Message ---
+            # Сообщения
             if 'message' in upd:
                 msg = upd['message']
                 chat_id = msg['chat']['id']
@@ -338,59 +337,56 @@ def handle_updates(offset):
                 # /start
                 if text == '/start':
                     if add_chat(chat_id, thread_id):
-                        send_text(chat_id, '✅ Бот активирован! Теперь сюда будут приходить посты.', thread_id)
+                        send_text(chat_id, '✅ Бот активирован!', thread_id)
                     else:
-                        send_text(chat_id, 'ℹ️ Бот уже активирован в этом чате.', thread_id)
+                        send_text(chat_id, 'ℹ️ Уже активирован.', thread_id)
                     continue
 
                 # Только для владельца
                 if from_user_id == OWNER_ID:
-                    # /menu
                     if text == '/menu':
                         keyboard = {
                             "inline_keyboard": [
                                 [
-                                    {"text": "📝 Режим: Ответ", "callback_data": "mode_reply"},
-                                    {"text": "📢 Режим: Рассылка", "callback_data": "mode_broadcast"}
+                                    {"text": "📝 Ответ", "callback_data": "mode_reply"},
+                                    {"text": "📢 Рассылка", "callback_data": "mode_broadcast"}
                                 ],
                                 [
-                                    {"text": "ℹ️ Текущий режим", "callback_data": "show_mode"},
-                                    {"text": "📄 Страница ВК", "callback_data": "show_page"}
+                                    {"text": "ℹ️ Режим", "callback_data": "show_mode"},
+                                    {"text": "📄 Страница", "callback_data": "show_page"}
                                 ]
                             ]
                         }
                         send_text(chat_id, "Меню:", thread_id, reply_markup=keyboard)
                         continue
 
-                    # /getpage
                     if text == '/getpage':
-                        send_text(chat_id, f"📄 Текущая страница ВК: {get_user_id()}", thread_id)
+                        send_text(chat_id, f"📄 Страница: {get_user_id()}", thread_id)
                         continue
 
-                    # /setpage
                     if text.startswith('/setpage'):
                         parts = text.split()
                         if len(parts) == 2 and parts[1].lstrip('-').isdigit():
                             new_id = parts[1].strip()
                             set_config('user_id', new_id)
-                            send_text(chat_id, f"✅ Страница изменена на {new_id}", thread_id)
+                            save_last_post_id(0)
+                            send_text(chat_id, f"✅ Страница {new_id}, last_post_id сброшен.", thread_id)
                         else:
-                            send_text(chat_id, "❌ Формат: /setpage <ID>\nПример: /setpage 1128567349", thread_id)
+                            send_text(chat_id, "❌ Формат: /setpage <ID>", thread_id)
                         continue
 
                     current_mode = get_mode(OWNER_ID)
 
-                    # Reply на пересланное
                     if reply_to:
                         original_msg_id = reply_to.get('message_id')
                         if original_msg_id in forwarded_map:
                             original_user = forwarded_map[original_msg_id]
                             if text:
                                 send_text(original_user, f"Ответ:\n{text}")
-                                send_text(chat_id, f"✅ Ответ отправлен в {original_user}")
+                                send_text(chat_id, f"✅ Отправлено в {original_user}")
                                 del forwarded_map[original_msg_id]
                             else:
-                                send_text(chat_id, "❌ Пустое сообщение")
+                                send_text(chat_id, "❌ Пусто")
                         else:
                             send_text(chat_id, "❌ Не могу найти получателя")
                     else:
@@ -400,12 +396,12 @@ def handle_updates(offset):
                                 forward_owner_message(msg, chats)
                                 send_text(chat_id, f"✅ Отправлено в {len(chats)} чатов")
                             else:
-                                send_text(chat_id, "❌ Нет активных чатов")
+                                send_text(chat_id, "❌ Нет чатов")
                         else:
-                            send_text(chat_id, "ℹ️ Режим Ответ. Используйте reply, либо /menu → Рассылка.")
+                            send_text(chat_id, "ℹ️ Режим Ответ. Используй reply или /menu")
                     continue
 
-                # Сообщение от пользователя в личку бота
+                # Сообщение от пользователя в личку
                 if chat_id == from_user_id:
                     try:
                         forward_url = f"https://api.telegram.org/bot{BOT_TOKEN}/forwardMessage"
@@ -418,7 +414,7 @@ def handle_updates(offset):
                     except Exception as e:
                         logging.error(f"Ошибка пересылки: {e}")
 
-            # --- Channel post ---
+            # Посты в каналах
             elif 'channel_post' in upd:
                 post = upd['channel_post']
                 chat_id = post['chat']['id']
@@ -431,17 +427,17 @@ def handle_updates(offset):
 
         return new_offset
     except Exception as e:
-        logging.error(f"Ошибка получения обновлений: {e}")
+        logging.error(f"Ошибка getUpdates: {e}")
         return offset
 
-# ---------- Telegram polling ----------
+# ---------- Telegram polling (в отдельном потоке) ----------
 def telegram_polling():
     try:
         with open('offset.txt', 'r') as f:
             offset = int(f.read().strip())
     except:
         offset = 0
-    logging.info(f"🤖 Telegram polling запущен с offset={offset}")
+    logging.info(f"🤖 Telegram polling, offset={offset}")
     while True:
         touch_activity()
         try:
@@ -522,9 +518,20 @@ def main():
 
     while True:
         touch_activity()
+        logging.info(f"🔄 Итерация VK, last_post_id={last_post_id}")
         try:
             current_user_id = get_user_id()
+            logging.info(f"📄 Проверяю страницу {current_user_id}")
             response = vk.wall.get(owner_id=current_user_id, count=5, filter='owner')
+
+            # Автопочинка: если last_post_id больше максимума на странице — сброс
+            if response['items']:
+                max_id = max(p['id'] for p in response['items'])
+                if last_post_id > max_id:
+                    logging.warning(f"⚠️ last_post_id ({last_post_id}) > макс. ({max_id}). Сброс в 0.")
+                    last_post_id = 0
+                    save_last_post_id(0)
+
             for post in response['items']:
                 post_id = post['id']
                 if post_id <= last_post_id:
@@ -559,4 +566,4 @@ def main():
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    main()
+    main()р
